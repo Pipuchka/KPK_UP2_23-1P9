@@ -1,127 +1,62 @@
-name: Check Fork Sync Status
+name: Check Fork Sync
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened]
-    branches:
-      - main
-      - master
 
 permissions:
   pull-requests: write
-  contents: read
 
 jobs:
-  check-fork-sync:
+  check-sync:
     runs-on: ubuntu-latest
-    
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha }}
-          
-      - name: Check if fork is synced
-        id: check_sync
-        run: |
-          # Получаем информацию о базовом репозитории (upstream)
-          BASE_REPO="${{ github.event.pull_request.base.repo.full_name }}"
-          HEAD_REPO="${{ github.event.pull_request.head.repo.full_name }}"
-          
-          # Проверяем, является ли PR из форка
-          if [ "$BASE_REPO" != "$HEAD_REPO" ]; then
-            echo "Это форк. Проверяем синхронизацию..."
-            
-            # Получаем коммиты из форка, которых нет в базовом репозитории
-            git remote add base "https://github.com/$BASE_REPO.git"
-            git fetch base ${{ github.event.pull_request.base.ref }}
-            
-            # Находим общий предок
-            BASE_COMMIT=$(git merge-base HEAD base/${{ github.event.pull_request.base.ref }})
-            
-            # Проверяем, есть ли коммиты в форке, которых нет в базовой ветке
-            # и которые не являются коммитами PR (коммиты из upstream должны быть общими)
-            BEHIND_COUNT=$(git rev-list --count $BASE_COMMIT..base/${{ github.event.pull_request.base.ref }} 2>/dev/null || echo "0")
-            
-            if [ "$BEHIND_COUNT" -gt 0 ]; then
-              echo "fork_is_behind=true" >> $GITHUB_OUTPUT
-              echo "behind_count=$BEHIND_COUNT" >> $GITHUB_OUTPUT
-            else
-              echo "fork_is_behind=false" >> $GITHUB_OUTPUT
-            fi
-          else
-            echo "Это не форк, пропускаем проверку"
-            echo "fork_is_behind=false" >> $GITHUB_OUTPUT
-          fi
-          
-      - name: Add comment and request changes if fork is behind
-        if: steps.check_sync.outputs.fork_is_behind == 'true'
+      - name: Check if PR is from fork and behind
         uses: actions/github-script@v7
         with:
           script: |
-            const behindCount = ${{ steps.check_sync.outputs.behind_count || 0 }};
-            const prNumber = context.payload.pull_request.number;
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
+            const pr = context.payload.pull_request;
+            const isFork = pr.head.repo.full_name !== pr.base.repo.full_name;
             
-            // Добавляем комментарий
-            await github.rest.issues.createComment({
-              owner: owner,
-              repo: repo,
-              issue_number: prNumber,
-              body: `⚠️ **Форк не синхронизирован с исходным репозиторием!**
-              
-              Ваш форк отстаёт от базового репозитория на **${behindCount}** коммит(ов).
-              
-              **Пожалуйста, синхронизируйте ваш форк перед тем, как продолжить работу:**
-              
-              1. Добавьте upstream репозиторий (если ещё не сделали):
-                 \`\`\`bash
-                 git remote add upstream https://github.com/${context.payload.pull_request.base.repo.full_name}.git
-                 \`\`\`
-              
-              2. Обновите ваш форк:
-                 \`\`\`bash
-                 git fetch upstream
-                 git checkout ${context.payload.pull_request.head.ref}
-                 git merge upstream/${context.payload.pull_request.base.ref}
-                 git push origin ${context.payload.pull_request.head.ref}
-                 \`\`\`
-              
-              После синхронизации форка этот PR автоматически обновится.`
-            });
-            
-            // Ставим статус "Request changes"
-            await github.rest.pulls.createReview({
-              owner: owner,
-              repo: repo,
-              pull_number: prNumber,
-              event: 'REQUEST_CHANGES',
-              body: '❌ Форк не синхронизирован. Пожалуйста, синхронизируйте ваш форк с исходным репозиторием.'
-            });
-            
-      - name: Add success comment if fork is synced
-        if: steps.check_sync.outputs.fork_is_behind == 'false'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const prNumber = context.payload.pull_request.number;
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const isFork = "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.event.pull_request.base.repo.full_name }}";
-            
-            if (isFork) {
-              await github.rest.issues.createComment({
-                owner: owner,
-                repo: repo,
-                issue_number: prNumber,
-                body: '✅ Ваш форк синхронизирован с исходным репозиторием. Продолжайте!'
-              });
+            if (!isFork) {
+              console.log("Not a fork, skipping");
+              return;
             }
             
-      - name: Fail the check if fork is behind
-        if: steps.check_sync.outputs.fork_is_behind == 'true'
-        run: |
-          echo "❌ Форк не синхронизирован!"
-          exit 1
+            // Используем GitHub API для сравнения веток
+            const { data: comparison } = await github.rest.repos.compareCommits({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              base: pr.base.ref,
+              head: `${pr.head.repo.owner.login}:${pr.head.ref}`
+            });
+            
+            const behindBy = comparison.behind_by;
+            
+            if (behindBy > 0) {
+              // Добавляем комментарий
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                body: `⚠️ **Форк не синхронизирован!** Отстаёт на ${behindBy} коммит(ов).\n\nПожалуйста, синхронизируйте ваш форк с исходным репозиторием.`
+              });
+              
+              // Запрашиваем изменения
+              await github.rest.pulls.createReview({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: pr.number,
+                event: 'REQUEST_CHANGES',
+                body: '❌ Синхронизируйте вилку'
+              });
+              
+              core.setFailed(`Fork is behind by ${behindBy} commits`);
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                body: '✅ Форк синхронизирован!'
+              });
+            }
