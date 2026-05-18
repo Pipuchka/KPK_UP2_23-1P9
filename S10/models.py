@@ -3,19 +3,16 @@ from peewee import *
 
 db = SqliteDatabase('employee_status.db')
 
-
 class BaseModel(Model):
     class Meta:
         database = db
 
 class Employee(BaseModel):
-    full_name = CharField(max_length=255, null=False)
-    birth_date = DateField(null=False)
+    """Минимальная информация о сотруднике – только ссылка на профиль и статус"""
+    user_id = IntegerField(unique=True, null=False)  # ID из Profile Service / Auth
     hire_date = DateField(null=False)
-    email = CharField(unique=True, null=True)
-    phone = CharField(max_length=20, null=True)
-    address = TextField(null=True)
-    status = CharField(max_length=20, default='active') 
+    status = CharField(max_length=20, default='active')  # active, on_vacation, sick_leave, fired
+    is_deleted = BooleanField(default=False)  # мягкое удаление
 
 class Position(BaseModel):
     title = CharField(max_length=100, null=False)
@@ -26,7 +23,7 @@ class EmployeePosition(BaseModel):
     position = ForeignKeyField(Position, backref='employees', on_delete='CASCADE', null=False)
     start_date = DateField(null=False)
     end_date = DateField(null=True)
-    load_factor = FloatField(null=False, constraints=[Check('load_factor > 0 AND load_factor <= 1')])
+    load_factor = FloatField(null=False)  # 1.0 = полная ставка
 
 class Vacation(BaseModel):
     employee = ForeignKeyField(Employee, backref='vacations', on_delete='CASCADE', null=False)
@@ -41,7 +38,6 @@ class SickLeave(BaseModel):
     diagnosis = TextField(null=True)
 
 def initialize_db():
-    """Создаёт таблицы, если они не существуют."""
     db.connect()
     db.create_tables([Employee, Position, EmployeePosition, Vacation, SickLeave], safe=True)
     db.close()

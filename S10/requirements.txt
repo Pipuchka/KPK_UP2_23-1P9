@@ -1,2 +1,4 @@
 peewee
-datetime
+fastapi
+pydantic
+uvicorn
