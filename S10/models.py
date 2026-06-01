@@ -1,13 +1,14 @@
 import datetime
 from peewee import *
-from playhouse import validate_one_of, validate_length
+from playhouse import validate_one_of, validate_length  
 
 db = SqliteDatabase('employee_status.db')
 
 # ---------- Валидаторы ----------
-def validate_positive_or_none(value):
-    if value is not None and value <= 0:
-        raise ValueError("Значение должно быть положительным или None")
+def validate_positive(value):
+    """Проверка, что значение — положительное целое (None не допускается)"""
+    if value <= 0:
+        raise ValueError("user_id должен быть положительным целым числом")
 
 def validate_hire_date(value):
     """Только проверка на слишком раннюю дату (будущее разрешено)"""
@@ -30,12 +31,12 @@ class Employee(BaseModel):
         db_table = "employees"
 
     id = AutoField()
-    user_id = IntegerField(unique=True, null=False, validators=[validate_positive_or_none])
+    user_id = IntegerField(unique=True, null=False, validators=[validate_positive]) 
     hire_date = DateField(null=False, validators=[validate_hire_date])
     status = CharField(max_length=20, default='active',
                       validators=[validate_one_of(['active', 'on_vacation', 'sick_leave', 'fired'])])
     is_deleted = BooleanField(default=False)
-    updated_at = DateTimeField(default=datetime.datetime.now)  # новое поле
+    updated_at = DateTimeField(default=datetime.datetime.now) 
 
     def save(self, *args, **kwargs):
         """Автоматически обновляем updated_at при каждом сохранении"""
@@ -89,7 +90,7 @@ class Vacation(BaseModel):
     start_date = DateField(null=False)
     end_date = DateField(null=False)
     type = CharField(max_length=50, null=False, validators=[validate_length(1, 50)])
-    is_deleted = BooleanField(default=False)  # мягкое удаление
+    is_deleted = BooleanField(default=False) 
 
     def save(self, *args, **kwargs):
         if self.end_date < self.start_date:
@@ -105,7 +106,7 @@ class SickLeave(BaseModel):
     start_date = DateField(null=False)
     end_date = DateField(null=False)
     diagnosis = TextField(null=True, validators=[validate_length(0, 500)])
-    is_deleted = BooleanField(default=False)  # мягкое удаление
+    is_deleted = BooleanField(default=False)
 
     def save(self, *args, **kwargs):
         if self.end_date < self.start_date:
