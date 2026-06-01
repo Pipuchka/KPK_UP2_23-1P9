@@ -6,20 +6,14 @@ db = SqliteDatabase('employee_status.db')
 
 # ---------- Валидаторы ----------
 def validate_positive(value):
-    """Проверка, что значение — положительное целое (None не допускается)"""
+    """Проверка, что значение — положительное целое"""
     if value <= 0:
         raise ValueError("user_id должен быть положительным целым числом")
 
 def validate_hire_date(value):
-    """Только проверка на слишком раннюю дату (будущее разрешено)"""
+    """Проверка, что дата найма не раньше 1900-01-01"""
     if value < datetime.date(1900, 1, 1):
         raise ValueError("Дата найма не может быть раньше 1900-01-01")
-    # Убрана проверка на будущее
-
-def validate_dates_start_end(start, end):
-    """Вспомогательная функция для проверки end_date >= start_date"""
-    if end is not None and end < start:
-        raise ValueError("Дата окончания не может быть раньше даты начала")
 
 # ---------- Модели ----------
 class BaseModel(Model):
@@ -43,9 +37,17 @@ class Employee(BaseModel):
         self.updated_at = datetime.datetime.now()
         return super().save(*args, **kwargs)
 
+    def soft_delete(self):
+        """Мягкое удаление сотрудника"""
+        if not self.is_deleted:
+            self.is_deleted = True
+            self.save()
+            return True
+        return False
+
     @property
     def positions(self):
-        """Возвращает список должностей в формате, требуемом в doc.md"""
+        """Возвращает список должностей в требуемом формате"""
         result = []
         for ep in EmployeePosition.select().where(EmployeePosition.employee == self):
             result.append({
@@ -76,7 +78,6 @@ class EmployeePosition(BaseModel):
     load_factor = FloatField(null=False)
 
     def save(self, *args, **kwargs):
-        # Проверка корректности дат (end_date >= start_date)
         if self.end_date is not None and self.end_date < self.start_date:
             raise ValueError("Дата окончания должности не может быть раньше даты начала")
         super().save(*args, **kwargs)
@@ -96,6 +97,14 @@ class Vacation(BaseModel):
         if self.end_date < self.start_date:
             raise ValueError("Дата окончания отпуска не может быть раньше даты начала")
         super().save(*args, **kwargs)
+    
+    def soft_delete(self):
+        """Мягкое удаление записи об отпуске"""
+        if not self.is_deleted:
+            self.is_deleted = True
+            self.save()
+            return True
+        return False
 
 class SickLeave(BaseModel):
     class Meta:
@@ -112,6 +121,14 @@ class SickLeave(BaseModel):
         if self.end_date < self.start_date:
             raise ValueError("Дата окончания больничного не может быть раньше даты начала")
         super().save(*args, **kwargs)
+    
+    def soft_delete(self):
+        """Мягкое удаление записи о больничном"""
+        if not self.is_deleted:
+            self.is_deleted = True
+            self.save()
+            return True
+        return False
 
 def initialize_db():
     db.connect()
