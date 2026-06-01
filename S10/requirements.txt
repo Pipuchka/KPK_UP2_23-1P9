@@ -2,3 +2,4 @@ peewee
 fastapi
 pydantic
 uvicorn
+playhouse
